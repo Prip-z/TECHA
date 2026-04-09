@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logging import setup_logging
 from app.routes.auth_routes import router as auth_router
+from app.routes.games_routes import router as game_router
 from app.routes.players_routes import router as players_router
 from app.routes.events_routes import router as events_router
 from app.routes.routes import router as system_router
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
     app.include_router(players_router)
     app.include_router(system_router)
     app.include_router(events_router)
+    app.include_router(game_router)
     return app
 
 

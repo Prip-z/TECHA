@@ -19,3 +19,8 @@ class GamePlayerResponse(BaseModel):
     game_id: int
     player_id: int
 
+class GamePlayerUpdate(BaseModel):
+    seat: int | None = None
+
+class GameFinishRequest(BaseModel):
+    result: GameResult

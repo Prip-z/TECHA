@@ -3,8 +3,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
-from app.model import Game, EventPlayer, GamePlayer
-from app.schema import GameCreate, GameResponse, GamePlayerResponse, EventAddPlayer
+from app.model import Game, GamePlayer, GameStatus
+from app.schema import GameCreate, GameResponse, GamePlayerResponse, EventAddPlayer, GamePlayerUpdate, GameFinishRequest
 
 router = APIRouter(prefix="/games", tags=["Games"])
 
@@ -74,3 +74,66 @@ def add_player_to_game(
     
     return new_game_player
 
+@router.put("/{game_id}/players/{player_id}", response_model=GamePlayerResponse)
+def update_player_in_game(
+    game_id: int, 
+    player_id: int, 
+    payload: GamePlayerUpdate, 
+    db: Session = Depends(get_db)
+) -> GamePlayer:
+    # Ищем конкретную "посадку" игрока в конкретной игре
+    registration = db.query(GamePlayer).filter(
+        GamePlayer.game_id == game_id,
+        GamePlayer.player_id == player_id
+    ).first()
+
+    if not registration:
+        raise HTTPException(status_code=404, detail="Player not found in this game")
+
+    # Обновляем только то, что прислали (например, номер места)
+    if payload.seat is not None:
+        registration.seat = payload.seat
+
+    db.commit()
+    db.refresh(registration)
+    return registration
+
+
+@router.delete("/{game_id}/players/{player_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_player_from_game(
+    game_id: int, 
+    player_id: int, 
+    db: Session = Depends(get_db)
+):
+    registration = db.query(GamePlayer).filter(
+        GamePlayer.game_id == game_id,
+        GamePlayer.player_id == player_id
+    ).first()
+
+    if not registration:
+        raise HTTPException(status_code=404, detail="Player not found in this game")
+
+    db.delete(registration)
+    db.commit()
+    return None
+
+@router.post("/{game_id}/finish", response_model=GameResponse)
+def finish_game(
+    game_id: int, 
+    payload: GameFinishRequest, 
+    db: Session = Depends(get_db)
+) -> Game:
+    game = db.get(Game, game_id)
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    if game.status == GameStatus.finished:
+        raise HTTPException(status_code=400, detail="Game is already finished")
+
+    game.status = GameStatus.finished
+    game.result = payload.result
+    
+    
+    db.commit()
+    db.refresh(game)
+    return game

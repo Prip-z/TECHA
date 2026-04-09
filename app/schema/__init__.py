@@ -1,7 +1,7 @@
 from .auth import AdminLoginRequest, AdminMeResponse, RegisterAdminRequest, TokenResponse
 from .player import PlayerListResponse, PlayerResponse, PlayerCreateRequest
 from .event import EventCreateRequest, EventListResponse, EventResponse, EventType, EventAddPlayer, EventPlayerResponse
-from .game import GameResponse, GameCreate, GamePlayerResponse
+from .game import GameResponse, GameCreate, GamePlayerResponse, GamePlayerUpdate, GameFinishRequest
 
 __all__ = [
     "AdminLoginRequest",
@@ -19,5 +19,7 @@ __all__ = [
     "EventPlayerResponse",
     "GameResponse",
     "GameCreate",
-    "GamePlayerResponse"
+    "GamePlayerResponse",
+    "GamePlayerUpdate",
+    "GameFinishRequest"
 ]

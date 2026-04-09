@@ -3,7 +3,7 @@
 from .admin import Admin
 from .event import Event, EventType
 from .event_player import EventPlayer
-from .game import Game
+from .game import Game, GameStatus
 from .game_participant import GameParticipant
 from .game_player import GamePlayer
 from .player import Player
@@ -29,5 +29,6 @@ __all__ = [
     "VotingVote",
     "EventType",
     "EventPlayer",
-    "GamePlayer"
+    "GamePlayer",
+    "GameStatus"
 ]
