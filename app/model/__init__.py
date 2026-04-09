@@ -1,11 +1,10 @@
 """Import models here so Alembic autogenerate can discover them."""
 
-from .admin import Admin
+from .admin import StaffRole, StaffUser
 from .event import Event, EventType
 from .event_player import EventPlayer
-from .game import Game, GameStatus
-from .game_participant import GameParticipant
-from .game_player import GamePlayer
+from .game import Game, GameResult, GameStatus
+from .game_participant import GameParticipant, ParticipantRole
 from .player import Player
 from .shooting_round import ShootingRound
 from .system_check import SystemCheck
@@ -14,12 +13,18 @@ from .testament import Testament, TestamentTarget
 from .voting_round import VotingNomination, VotingRound, VotingVote
 
 __all__ = [
-    "Admin",
     "Event",
+    "EventPlayer",
+    "EventType",
     "Game",
     "GameParticipant",
+    "GameResult",
+    "GameStatus",
+    "ParticipantRole",
     "Player",
     "ShootingRound",
+    "StaffRole",
+    "StaffUser",
     "SystemCheck",
     "Table",
     "Testament",
@@ -27,8 +32,4 @@ __all__ = [
     "VotingNomination",
     "VotingRound",
     "VotingVote",
-    "EventType",
-    "EventPlayer",
-    "GamePlayer",
-    "GameStatus"
 ]

@@ -13,7 +13,11 @@ class VotingRound(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.game_id"), nullable=False, index=True)
     round_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_revote: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     is_tie: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_lift_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    eliminated_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"), nullable=True, index=True)
 
 
 class VotingNomination(Base):

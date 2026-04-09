@@ -17,8 +17,3 @@ class SystemCheck(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    lol: Mapped[str | None] = mapped_column(
-        String(32),
-        nullable=True,
-        server_default="NIGGERS",
-    )

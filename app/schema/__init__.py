@@ -1,25 +1,36 @@
-from .auth import AdminLoginRequest, AdminMeResponse, RegisterAdminRequest, TokenResponse
-from .player import PlayerListResponse, PlayerResponse, PlayerCreateRequest
-from .event import EventCreateRequest, EventListResponse, EventResponse, EventType, EventAddPlayer, EventPlayerResponse
-from .game import GameResponse, GameCreate, GamePlayerResponse, GamePlayerUpdate, GameFinishRequest
+from .auth import CreateStaffRequest, StaffLoginRequest, StaffMeResponse, StaffResponse, TokenResponse, UpdateStaffRequest
+from .event import EventAddPlayer, EventCreateRequest, EventListResponse, EventPlayerResponse, EventResponse
+from .game import (
+    GameCreateRequest,
+    GameFinishRequest,
+    GameParticipantCreateRequest,
+    GameParticipantResponse,
+    GameParticipantUpdateRequest,
+    GameResponse,
+)
+from .player import PlayerCreateRequest, PlayerListResponse, PlayerResponse
+from app.model import EventType
 
 __all__ = [
-    "AdminLoginRequest",
-    "AdminMeResponse",
+    "CreateStaffRequest",
+    "EventAddPlayer",
+    "EventCreateRequest",
+    "EventListResponse",
+    "EventPlayerResponse",
+    "EventResponse",
+    "EventType",
+    "GameCreateRequest",
+    "GameFinishRequest",
+    "GameParticipantCreateRequest",
+    "GameParticipantResponse",
+    "GameParticipantUpdateRequest",
+    "GameResponse",
+    "PlayerCreateRequest",
     "PlayerListResponse",
     "PlayerResponse",
-    "RegisterAdminRequest",
+    "StaffLoginRequest",
+    "StaffMeResponse",
+    "StaffResponse",
     "TokenResponse",
-    "PlayerCreateRequest",
-    "EventListResponse", 
-    "EventResponse", 
-    "EventCreateRequest",
-    "EventType",
-    "EventAddPlayer",
-    "EventPlayerResponse",
-    "GameResponse",
-    "GameCreate",
-    "GamePlayerResponse",
-    "GamePlayerUpdate",
-    "GameFinishRequest"
+    "UpdateStaffRequest",
 ]
