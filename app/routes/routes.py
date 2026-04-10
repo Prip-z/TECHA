@@ -71,5 +71,4 @@ async def health_db(db: Session = Depends(get_db)) -> dict[str, str | int | None
         "row_id": row.id,
         "name": row.name,
         "db_status": row.status,
-        "lol": row.lol,
     }

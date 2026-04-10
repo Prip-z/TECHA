@@ -1,13 +1,14 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
-from app.model import Event, EventPlayer, EventType, StaffUser
+from app.model import Event, EventPlayer, EventType, Game, StaffUser, Table, Player, StaffUser as StaffAccount
 from app.routes.auth_routes import get_current_staff
-from app.schema import EventAddPlayer, EventCreateRequest, EventListResponse, EventPlayerResponse, EventResponse
+from app.routes.sync_routes import broadcast_sync_event
+from app.schema import EventAddPlayer, EventCreateRequest, EventGameItem, EventListResponse, EventPlayerResponse, EventResponse, EventRosterItem
 from app.services.export_service import build_event_export
 from io import BytesIO
 
@@ -55,6 +56,7 @@ def list_events(
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=EventResponse)
 def create_event(
     payload: EventCreateRequest,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> EventResponse:
@@ -72,6 +74,12 @@ def create_event(
     db.add(event)
     db.commit()
     db.refresh(event)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        "dashboard",
+        "event_updated",
+        {"eventId": event.id, "reason": "event_created"},
+    )
     return EventResponse.model_validate(event)
 
 
@@ -79,6 +87,7 @@ def create_event(
 def put_event(
     event_id: int,
     payload: EventCreateRequest,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> EventResponse:
@@ -91,6 +100,18 @@ def put_event(
     event.price_per_game = 0 if payload.type == EventType.tournament else payload.price_per_game
     db.commit()
     db.refresh(event)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        "dashboard",
+        "event_updated",
+        {"eventId": event.id, "reason": "event_updated"},
+    )
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"event-{event.id}",
+        "event_updated",
+        {"eventId": event.id, "reason": "event_updated"},
+    )
     return EventResponse.model_validate(event)
 
 
@@ -98,6 +119,7 @@ def put_event(
 def add_player(
     event_id: int,
     payload: EventAddPlayer,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> EventPlayerResponse:
@@ -117,13 +139,85 @@ def add_player(
     db.add(registration)
     db.commit()
     db.refresh(registration)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"event-{event_id}",
+        "event_updated",
+        {"eventId": event_id, "reason": "player_added", "playerId": payload.player_id},
+    )
     return EventPlayerResponse.model_validate(registration)
+
+
+@router.get("/{event_id}/players", response_model=list[EventRosterItem])
+def list_event_players(
+    event_id: int,
+    _: StaffUser = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+) -> list[EventRosterItem]:
+    event = db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    rows = (
+        db.query(EventPlayer, Player)
+        .join(Player, Player.id == EventPlayer.player_id)
+        .filter(EventPlayer.event_id == event_id)
+        .order_by(Player.nick.asc(), Player.id.asc())
+        .all()
+    )
+    return [
+        EventRosterItem(
+            id=registration.id,
+            player_id=player.id,
+            name=player.name,
+            nick=player.nick,
+            phone=player.phone,
+            social_link=player.social_link,
+            games_played=registration.games_played,
+            paid_amount=registration.paid_amount,
+        )
+        for registration, player in rows
+    ]
+
+
+@router.get("/{event_id}/games", response_model=list[EventGameItem])
+def list_event_games(
+    event_id: int,
+    _: StaffUser = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+) -> list[EventGameItem]:
+    event = db.get(Event, event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    rows = (
+        db.query(Game, Table, StaffAccount)
+        .join(Table, Table.id == Game.table_id)
+        .join(StaffAccount, StaffAccount.id == Game.host_staff_id)
+        .filter(Game.event_id == event_id)
+        .order_by(Game.game_number.asc(), Game.game_id.asc())
+        .all()
+    )
+    return [
+        EventGameItem(
+            game_id=game.game_id,
+            game_number=game.game_number,
+            table_id=table.id,
+            table_name=table.name,
+            host_staff_id=host.id,
+            host_name=host.name,
+            status=game.status.value,
+            result=game.result.value if game.result else None,
+        )
+        for game, table, host in rows
+    ]
 
 
 @router.delete("/{event_id}/players/{player_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_player(
     event_id: int,
     player_id: int,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> None:
@@ -141,6 +235,12 @@ def delete_player(
 
     db.delete(registration)
     db.commit()
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"event-{event_id}",
+        "event_updated",
+        {"eventId": event_id, "reason": "player_removed", "playerId": player_id},
+    )
 
 
 @router.get("/{event_id}/export")

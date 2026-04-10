@@ -1,6 +1,7 @@
 """Import models here so Alembic autogenerate can discover them."""
 
 from .admin import StaffRole, StaffUser
+from .app_setting import AppSetting
 from .event import Event, EventType
 from .event_player import EventPlayer
 from .game import Game, GameResult, GameStatus
@@ -13,6 +14,7 @@ from .testament import Testament, TestamentTarget
 from .voting_round import VotingNomination, VotingRound, VotingVote
 
 __all__ = [
+    "AppSetting",
     "Event",
     "EventPlayer",
     "EventType",

@@ -8,6 +8,9 @@ from app.routes.games_routes import router as game_router
 from app.routes.players_routes import router as players_router
 from app.routes.events_routes import router as events_router
 from app.routes.routes import router as system_router
+from app.routes.sync_routes import router as sync_router
+from app.routes.settings_routes import router as settings_router
+from app.routes.tables_routes import router as tables_router
 
 
 def create_app() -> FastAPI:
@@ -36,6 +39,9 @@ def create_app() -> FastAPI:
     app.include_router(system_router)
     app.include_router(events_router)
     app.include_router(game_router)
+    app.include_router(tables_router)
+    app.include_router(sync_router)
+    app.include_router(settings_router)
     return app
 
 

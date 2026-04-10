@@ -1,16 +1,18 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.dependencies import get_db
-from app.model import Event, EventPlayer, EventType, Game, GameParticipant, GameStatus, ParticipantRole, StaffRole, StaffUser, Table
+from app.model import Event, EventPlayer, EventType, Game, GameParticipant, GameStatus, ParticipantRole, Player, StaffRole, StaffUser, Table
 from app.routes.auth_routes import get_current_staff
+from app.routes.sync_routes import broadcast_sync_event
 from app.schema import (
     GameCreateRequest,
     GameFinishRequest,
+    GameParticipantDetailResponse,
     GameParticipantCreateRequest,
     GameParticipantResponse,
     GameParticipantUpdateRequest,
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/games", tags=["Games"])
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=GameResponse)
 def create_game(
     payload: GameCreateRequest,
+    background_tasks: BackgroundTasks,
     staff: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> GameResponse:
@@ -46,6 +49,12 @@ def create_game(
     db.add(game)
     db.commit()
     db.refresh(game)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"event-{payload.event_id}",
+        "event_updated",
+        {"eventId": payload.event_id, "reason": "game_created", "gameId": game.game_id},
+    )
     return GameResponse.model_validate(game)
 
 
@@ -61,10 +70,46 @@ def get_game(
     return GameResponse.model_validate(game)
 
 
+@router.get("/{game_id}/participants", response_model=list[GameParticipantDetailResponse])
+def list_game_participants(
+    game_id: int,
+    _: StaffUser = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+) -> list[GameParticipantDetailResponse]:
+    game = db.get(Game, game_id)
+    if game is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Game not found")
+
+    rows = (
+        db.query(GameParticipant, Player)
+        .join(Player, Player.id == GameParticipant.player_id)
+        .filter(GameParticipant.game_id == game_id)
+        .order_by(GameParticipant.seat_number.asc(), GameParticipant.id.asc())
+        .all()
+    )
+    return [
+        GameParticipantDetailResponse(
+            id=participant.id,
+            game_id=participant.game_id,
+            player_id=player.id,
+            name=player.name,
+            nick=player.nick,
+            seat_number=participant.seat_number,
+            fouls=participant.fouls,
+            score=participant.score,
+            extra_score=participant.extra_score,
+            role=participant.role,
+            is_alive=participant.is_alive,
+        )
+        for participant, player in rows
+    ]
+
+
 @router.post("/{game_id}/participants", status_code=status.HTTP_201_CREATED, response_model=GameParticipantResponse)
 def add_player_to_game(
     game_id: int,
     payload: GameParticipantCreateRequest,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> GameParticipantResponse:
@@ -98,6 +143,12 @@ def add_player_to_game(
     db.add(participant)
     db.commit()
     db.refresh(participant)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"game-{game_id}",
+        "game_updated",
+        {"gameId": game_id, "reason": "participant_added", "participantId": participant.id},
+    )
     return GameParticipantResponse.model_validate(participant)
 
 
@@ -106,6 +157,7 @@ def update_player_in_game(
     game_id: int,
     participant_id: int,
     payload: GameParticipantUpdateRequest,
+    background_tasks: BackgroundTasks,
     staff: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> GameParticipantResponse:
@@ -154,6 +206,12 @@ def update_player_in_game(
         db.rollback()
         raise HTTPException(status_code=400, detail="Failed to update participant") from exc
     db.refresh(participant)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"game-{game_id}",
+        "game_updated",
+        {"gameId": game_id, "reason": "participant_updated", "participantId": participant_id},
+    )
     return GameParticipantResponse.model_validate(participant)
 
 
@@ -161,6 +219,7 @@ def update_player_in_game(
 def remove_player_from_game(
     game_id: int,
     participant_id: int,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> None:
@@ -174,11 +233,18 @@ def remove_player_from_game(
         raise HTTPException(status_code=400, detail="Participants can only be removed before the game starts")
     db.delete(participant)
     db.commit()
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"game-{game_id}",
+        "game_updated",
+        {"gameId": game_id, "reason": "participant_removed", "participantId": participant_id},
+    )
 
 
 @router.post("/{game_id}/start", response_model=GameResponse)
 def start_game(
     game_id: int,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> GameResponse:
@@ -215,6 +281,18 @@ def start_game(
     game.started_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(game)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"game-{game_id}",
+        "game_updated",
+        {"gameId": game_id, "reason": "game_started"},
+    )
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"event-{game.event_id}",
+        "event_updated",
+        {"eventId": game.event_id, "reason": "game_started", "gameId": game_id},
+    )
     return GameResponse.model_validate(game)
 
 
@@ -222,6 +300,7 @@ def start_game(
 def finish_game(
     game_id: int,
     payload: GameFinishRequest,
+    background_tasks: BackgroundTasks,
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> GameResponse:
@@ -239,6 +318,18 @@ def finish_game(
     game.finished_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(game)
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"game-{game_id}",
+        "game_updated",
+        {"gameId": game_id, "reason": "game_finished"},
+    )
+    background_tasks.add_task(
+        broadcast_sync_event,
+        f"event-{game.event_id}",
+        "event_updated",
+        {"eventId": game.event_id, "reason": "game_finished", "gameId": game_id},
+    )
     return GameResponse.model_validate(game)
 
 

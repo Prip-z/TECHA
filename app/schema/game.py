@@ -44,6 +44,20 @@ class GameParticipantResponse(BaseModel):
     is_alive: bool
 
 
+class GameParticipantDetailResponse(BaseModel):
+    id: int
+    game_id: int
+    player_id: int
+    name: str
+    nick: str
+    seat_number: int
+    fouls: int
+    score: float
+    extra_score: float
+    role: ParticipantRole
+    is_alive: bool
+
+
 class GameParticipantUpdateRequest(BaseModel):
     seat_number: int | None = None
     fouls: int | None = Field(default=None, ge=0, le=4)
