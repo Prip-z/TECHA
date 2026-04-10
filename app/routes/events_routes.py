@@ -58,6 +58,11 @@ def create_event(
     _: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> EventResponse:
+    date = db.query(Event).filter(
+        Event.date == payload.date,
+    ).first()
+    if date:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Event is already exist")
     event = Event(
         name=payload.name,
         date=payload.date,

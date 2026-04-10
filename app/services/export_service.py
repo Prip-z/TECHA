@@ -4,6 +4,7 @@ from io import BytesIO
 import re
 
 from openpyxl import Workbook
+from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.styles import Font
 from sqlalchemy.orm import Session
 
@@ -44,6 +45,8 @@ def _safe_filename(value: str) -> str:
 def build_event_export(db: Session, event: Event) -> tuple[str, bytes]:
     workbook = Workbook()
     summary = workbook.active
+    if not isinstance(summary, Worksheet):
+        raise ValueError("Excel is shit")
     summary.title = "Event"
 
     _add_header_row(summary, ["Field", "Value"])
@@ -117,6 +120,8 @@ def build_event_export(db: Session, event: Event) -> tuple[str, bytes]:
 def build_game_export(db: Session, game: Game) -> tuple[str, bytes]:
     workbook = Workbook()
     summary = workbook.active
+    if not isinstance(summary, Worksheet):
+        raise ValueError("Excel is shit")
     summary.title = "Game"
 
     event = db.get(Event, game.event_id)
