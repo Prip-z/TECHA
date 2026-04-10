@@ -39,8 +39,13 @@ def list_players(
 def create_player(
     payload: PlayerCreateRequest,
     _: StaffUser = Depends(get_current_staff),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db)
 ) -> PlayerResponse:
+    existing = db.query(Player).filter(
+        Player.nick == payload.nick,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="NICK IS ALREADY EXIST")
     player = Player(
         name=payload.name,
         nick=payload.nick,
