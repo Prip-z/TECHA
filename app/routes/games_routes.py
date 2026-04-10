@@ -10,6 +10,7 @@ from app.model import Event, EventPlayer, EventType, Game, GameParticipant, Game
 from app.routes.auth_routes import get_current_staff
 from app.routes.sync_routes import broadcast_sync_event
 from app.schema import (
+    GameDraftExportRequest,
     GameCreateRequest,
     GameFinishRequest,
     GameParticipantDetailResponse,
@@ -301,12 +302,14 @@ def finish_game(
     game_id: int,
     payload: GameFinishRequest,
     background_tasks: BackgroundTasks,
-    _: StaffUser = Depends(get_current_staff),
+    staff: StaffUser = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ) -> GameResponse:
     game = db.get(Game, game_id)
     if game is None:
         raise HTTPException(status_code=404, detail="Game not found")
+    if staff.role not in {StaffRole.admin, StaffRole.super_admin}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can finish the game")
     if game.status == GameStatus.finished:
         raise HTTPException(status_code=400, detail="Game is already finished")
     if payload.confirm_word.strip().lower() != "\u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044c":
@@ -344,6 +347,25 @@ def export_game(
         raise HTTPException(status_code=404, detail="Game not found")
 
     filename, content = build_game_export(db, game)
+    return StreamingResponse(
+        BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{game_id}/export")
+def export_game_from_draft(
+    game_id: int,
+    payload: GameDraftExportRequest,
+    _: StaffUser = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    game = db.get(Game, game_id)
+    if game is None:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    filename, content = build_game_export(db, game, payload)
     return StreamingResponse(
         BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

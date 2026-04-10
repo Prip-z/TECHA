@@ -267,4 +267,26 @@ export const api = {
     anchor.click();
     URL.revokeObjectURL(objectUrl);
   },
+
+  async downloadFilePost(path: string, token: string, payload: unknown, suggestedName: string) {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const message = await response.text();
+      throw new ApiError(response.status, message || "Download failed");
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = suggestedName;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+  },
 };

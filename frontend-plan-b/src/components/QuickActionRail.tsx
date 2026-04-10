@@ -1,7 +1,9 @@
-export function QuickActionRail({ onExport }: { onExport: () => void }) {
+export function QuickActionRail({ onExport, exportDisabled = false }: { onExport: () => void; exportDisabled?: boolean }) {
   return (
     <div className="quick-action-rail">
-      <button onClick={onExport}>Экспорт</button>
+      <button disabled={exportDisabled} onClick={onExport}>
+        Экспорт
+      </button>
     </div>
   );
 }

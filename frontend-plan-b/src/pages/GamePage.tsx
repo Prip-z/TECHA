@@ -164,6 +164,23 @@ export function GamePage() {
     [currentVote.nominations, currentVote.votes],
   );
   const votersEntered = useMemo(() => Object.keys(currentVote.votes).length, [currentVote.votes]);
+  const voteLeaders = useMemo(() => {
+    const ranked = currentVote.nominations
+      .map((seat) => ({ seat, votes: voteCounts[seat] ?? 0 }))
+      .sort((left, right) => right.votes - left.votes || left.seat - right.seat);
+    if (ranked.length === 0) return [];
+    const topVotes = ranked[0].votes;
+    return ranked.filter((item) => item.votes === topVotes);
+  }, [currentVote.nominations, voteCounts]);
+  const voteResultLabel = useMemo(() => {
+    if (currentVote.isRevote) return "Нужно переголосование";
+    if (currentVote.isTie) return "Ничья";
+    if (voteLeaders.length === 0) return "Нет результата";
+    if (voteLeaders.length > 1) return "Ничья по голосам";
+    return `Выбывает место ${voteLeaders[0].seat}`;
+  }, [currentVote.isRevote, currentVote.isTie, voteLeaders]);
+  const canEditFinishedFouls = user?.role === "admin" || user?.role === "super_admin";
+  const canFinishGame = user?.role === "admin" || user?.role === "super_admin";
 
   function syncDraft(nextDraft: GameDraftState) {
     const normalized = normalizeDraft(nextDraft);
@@ -195,7 +212,6 @@ export function GamePage() {
     const seatNumber = getNextSeatNumber();
     if (!seatNumber) return;
     await api.addGameParticipant(token, game.game_id, { player_id: playerId, seat_number: seatNumber });
-    setShowPlayerModal(false);
     await load();
   }
 
@@ -227,6 +243,7 @@ export function GamePage() {
     });
     setGame(response);
     syncDraft({ ...draft, stage: response.status });
+    await load();
   }
 
   function toggleTimer(preset: 30 | 60 | 90) {
@@ -338,6 +355,32 @@ export function GamePage() {
     });
   }
 
+  function applyVoteResult() {
+    if (currentVote.isRevote || currentVote.isTie || voteLeaders.length > 1) {
+      const revoteCandidates = voteLeaders.length > 1 ? voteLeaders.map((item) => item.seat) : currentVote.nominations;
+      updateDraftLocally((current) => ({
+        ...current,
+        stage: "revote",
+        votes: ensureVoteRound(current).map((item) =>
+          item.round === current.roundNumber
+            ? {
+                ...item,
+                nominations: revoteCandidates,
+                votes: {},
+                isTie: false,
+                isRevote: true,
+              }
+            : item,
+        ),
+      }));
+      return;
+    }
+    if (voteLeaders.length !== 1) return;
+    const eliminatedParticipant = participants.find((item) => item.seat_number === voteLeaders[0].seat);
+    if (!eliminatedParticipant) return;
+    void updateParticipant(eliminatedParticipant.id, { is_alive: false });
+  }
+
   function startNextDay() {
     if (draft.phase !== "night") return;
     const nextRound = draft.roundNumber + 1;
@@ -368,7 +411,7 @@ export function GamePage() {
 
   function exportGame() {
     if (!token) return;
-    void api.downloadFile(`/games/${numericGameId}/export`, token, `game-${numericGameId}.xlsx`);
+    void api.downloadFilePost(`/games/${numericGameId}/export`, token, draft, `game-${numericGameId}.xlsx`);
   }
 
   if (!game) {
@@ -429,7 +472,12 @@ export function GamePage() {
             <div key={participant.id} className={`participant-row ${participant.is_alive ? "" : "dead"}`}>
               <span>{participant.seat_number}</span>
               <span>{participant.nick}</span>
-              <button onClick={() => void updateParticipant(participant.id, { fouls: Math.min(4, participant.fouls + 1) })}>{participant.fouls}</button>
+              <button
+                disabled={game.status === "finished" && !canEditFinishedFouls}
+                onClick={() => void updateParticipant(participant.id, { fouls: Math.min(4, participant.fouls + 1) })}
+              >
+                {participant.fouls}
+              </button>
               <input type="number" value={participant.score} onChange={(event) => void updateParticipant(participant.id, { score: Number(event.target.value) })} />
               <input
                 type="number"
@@ -437,7 +485,14 @@ export function GamePage() {
                 value={participant.extra_score}
                 onChange={(event) => void updateParticipant(participant.id, { extra_score: Number(event.target.value) })}
               />
-              {game.status === "preparation" ? (
+              {game.status === "finished" ? (
+                <select value={participant.role} onChange={(event) => void updateParticipant(participant.id, { role: event.target.value as GameParticipant["role"] })}>
+                  <option value="civilian">Мирный</option>
+                  <option value="mafia">Мафия</option>
+                  <option value="don">Дон</option>
+                  <option value="sheriff">Шериф</option>
+                </select>
+              ) : game.status === "preparation" ? (
                 <button className="ghost-button small" onClick={() => void removeParticipant(participant.id)}>
                   Удалить
                 </button>
@@ -519,20 +574,44 @@ export function GamePage() {
 
                 <div className="switch-row">
                   <label>
-                    <input type="checkbox" checked={currentVote.isTie} onChange={(event) => updateDraftLocally((current) => ({
-                      ...current,
-                      votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, isTie: event.target.checked } : item)),
-                    }))} />
+                    <input
+                      type="checkbox"
+                      checked={currentVote.isTie}
+                      onChange={(event) =>
+                        updateDraftLocally((current) => ({
+                          ...current,
+                          votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, isTie: event.target.checked } : item)),
+                        }))
+                      }
+                    />
                     ничья
                   </label>
                   <label>
-                    <input type="checkbox" checked={currentVote.isRevote} onChange={(event) => updateDraftLocally((current) => ({
-                      ...current,
-                      votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, isRevote: event.target.checked } : item)),
-                    }))} />
+                    <input
+                      type="checkbox"
+                      checked={currentVote.isRevote}
+                      onChange={(event) =>
+                        updateDraftLocally((current) => ({
+                          ...current,
+                          votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, isRevote: event.target.checked } : item)),
+                        }))
+                      }
+                    />
                     переголосование
                   </label>
                 </div>
+
+                <div className="vote-row">
+                  <strong>{voteResultLabel}</strong>
+                  <div className="vote-counter">
+                    {voteLeaders.length === 1 ? <span>{voteCounts[voteLeaders[0].seat] ?? 0} голосов</span> : null}
+                    {voteLeaders.length > 1 ? <span>{voteLeaders.map((item) => item.seat).join(", ")}</span> : null}
+                  </div>
+                </div>
+
+                <button className="ghost-button" onClick={applyVoteResult}>
+                  Применить результат голосования
+                </button>
 
                 <button className="primary-button" onClick={startNight}>
                   Закрыть голосование и перейти к ночи
@@ -572,31 +651,54 @@ export function GamePage() {
         </section>
       ) : null}
 
-      <section className="section-card">
-        <div className="section-heading">
-          <h2>Завершение игры</h2>
-        </div>
-        <div className="result-grid">
-          <select value={draft.winner ?? ""} onChange={(event) => syncDraft({ ...draft, winner: event.target.value as GameResult })}>
-            <option value="">Выбери победителя</option>
-            {resultOptions.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          <input value={finishWord} onChange={(event) => setFinishWord(event.target.value)} placeholder="Слово: завершить" />
-          <textarea value={draft.protests} onChange={(event) => syncDraft({ ...draft, protests: event.target.value })} placeholder="Протесты и заметки" />
-          <button className="primary-button" onClick={() => void handleFinishGame()}>
-            Завершить игру
-          </button>
-        </div>
-      </section>
+      {game.status === "finished" ? (
+        <section className="section-card">
+          <div className="section-heading">
+            <h2>Игра завершена</h2>
+          </div>
+          <div className="stats-grid">
+            <div className="stat-box">
+              <span>Победитель</span>
+              <strong>{draft.winner ? resultOptions.find((item) => item.value === draft.winner)?.label ?? draft.winner : "Не выбран"}</strong>
+            </div>
+            <div className="stat-box">
+              <span>Статус</span>
+              <strong>{statusLabels[game.status] ?? game.status}</strong>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {game.status !== "preparation" ? (
+        <section className="section-card">
+          <div className="section-heading">
+            <h2>Завершение игры</h2>
+          </div>
+          <div className="result-grid">
+            <select value={draft.winner ?? ""} onChange={(event) => syncDraft({ ...draft, winner: event.target.value as GameResult })}>
+              <option value="">Выбери победителя</option>
+              {resultOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            <input value={finishWord} onChange={(event) => setFinishWord(event.target.value)} placeholder="Слово: завершить" />
+            <textarea value={draft.protests} onChange={(event) => syncDraft({ ...draft, protests: event.target.value })} placeholder="Протесты и заметки" />
+            {canFinishGame ? (
+              <button className="primary-button" onClick={() => void handleFinishGame()}>
+                Завершить игру
+              </button>
+            ) : (
+              <small>Завершить игру может только админ.</small>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       <section className="section-card">
         <div className="section-heading">
           <h2>Чат судей</h2>
-          <small>Без дублей сообщений.</small>
         </div>
         <div className="chat-list">
           {draft.chat.map((item) => (
@@ -612,7 +714,7 @@ export function GamePage() {
         </div>
       </section>
 
-      <QuickActionRail onExport={exportGame} />
+      <QuickActionRail onExport={exportGame} exportDisabled={game.status !== "finished"} />
 
       {showPlayerModal ? (
         <Modal title="Добавить игрока в игру" onClose={() => setShowPlayerModal(false)}>
@@ -626,7 +728,7 @@ export function GamePage() {
                       {player.name} | игр на вечере: {player.games_played}
                     </small>
                   </div>
-                  <span>Место {getNextSeatNumber()}</span>
+                  <span>Добавить</span>
                 </button>
               ))}
             </div>

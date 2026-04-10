@@ -71,3 +71,41 @@ class GameFinishRequest(BaseModel):
     confirm_word: str
     result: GameResult
     protests: str | None = None
+
+
+class VoteDraftRequest(BaseModel):
+    round: int
+    nominations: list[int] = []
+    votes: dict[str, int | str] = {}
+    isTie: bool = False
+    isRevote: bool = False
+    liftApplied: bool = False
+
+
+class ShotDraftRequest(BaseModel):
+    round: int
+    shooterSeat: int | None = None
+    targetSeat: int | str | None = None
+
+
+class TestamentDraftRequest(BaseModel):
+    sourceSeat: int | None = None
+    targetSeats: list[int] = []
+
+
+class NightDraftRequest(BaseModel):
+    round: int
+    killedSeat: int | None = None
+    notes: str = ""
+
+
+class GameDraftExportRequest(BaseModel):
+    stage: GameStatus | None = None
+    roundNumber: int | None = None
+    phase: str | None = None
+    winner: GameResult | None = None
+    protests: str | None = None
+    votes: list[VoteDraftRequest] = []
+    shots: list[ShotDraftRequest] = []
+    testament: TestamentDraftRequest = TestamentDraftRequest()
+    nights: list[NightDraftRequest] = []

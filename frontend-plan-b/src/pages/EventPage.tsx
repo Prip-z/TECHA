@@ -28,6 +28,7 @@ export function EventPage() {
   const [games, setGames] = useState<EventGameItem[]>([]);
   const [tables, setTables] = useState<TableRecord[]>([]);
   const [players, setPlayers] = useState<PlayerRecord[]>([]);
+  const [rating, setRating] = useState<Array<{ playerId: number; nick: string; name: string; totalScore: number; games: number }>>([]);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showGameModal, setShowGameModal] = useState(false);
   const [showStats, setShowStats] = useState(false);
@@ -48,6 +49,23 @@ export function EventPage() {
     setGames(gamesResponse);
     setTables(tablesResponse);
     setGameTableId(tablesResponse[0]?.id ?? null);
+    const participantsByGame = await Promise.all(gamesResponse.map((item) => api.listGameParticipants(token, item.game_id)));
+    const rosterById = new Map(playersResponse.map((item) => [item.player_id, item]));
+    const ratingMap = new Map<number, { playerId: number; nick: string; name: string; totalScore: number; games: number }>();
+    participantsByGame.flat().forEach((participant) => {
+      const rosterItem = rosterById.get(participant.player_id);
+      const current = ratingMap.get(participant.player_id) ?? {
+        playerId: participant.player_id,
+        nick: participant.nick,
+        name: rosterItem?.name ?? participant.name,
+        totalScore: 0,
+        games: 0,
+      };
+      current.totalScore += participant.score + participant.extra_score;
+      current.games += 1;
+      ratingMap.set(participant.player_id, current);
+    });
+    setRating([...ratingMap.values()].sort((left, right) => right.totalScore - left.totalScore || right.games - left.games || left.nick.localeCompare(right.nick)));
   }
 
   useEffect(() => {
@@ -72,17 +90,17 @@ export function EventPage() {
   useRealtimeRoom(eventId ? `event-${eventId}` : null, token, handleRealtimeMessage);
 
   const totals = useMemo(() => {
-    const totalGames = roster.reduce((sum, item) => sum + item.games_played, 0);
     const totalPaid = roster.reduce((sum, item) => sum + item.paid_amount, 0);
-    return { totalGames, totalPaid };
+    return { totalPaid };
   }, [roster]);
 
   async function addPlayer(playerId: number) {
     if (!token) return;
     await api.addEventPlayer(token, numericEventId, playerId);
-    setShowPlayerModal(false);
-    setSearch("");
-    setPlayers([]);
+    if (search.trim()) {
+      const response = await api.listPlayers(token, search);
+      setPlayers(response.items.filter((item) => item.id !== playerId));
+    }
     await load();
   }
 
@@ -182,18 +200,29 @@ export function EventPage() {
           Статистика вечера
         </button>
         {showStats ? (
-          <div className="stats-grid">
-            <div className="stat-box">
-              <span>Игроки</span>
-              <strong>{roster.length}</strong>
+          <div className="modal-stack">
+            <div className="stats-grid">
+              <div className="stat-box">
+                <span>Игроки</span>
+                <strong>{roster.length}</strong>
+              </div>
+              <div className="stat-box">
+                <span>Оплачено</span>
+                <strong>{totals.totalPaid.toFixed(2)} ₽</strong>
+              </div>
             </div>
-            <div className="stat-box">
-              <span>Сыграно</span>
-              <strong>{totals.totalGames}</strong>
-            </div>
-            <div className="stat-box">
-              <span>Оплачено</span>
-              <strong>{totals.totalPaid.toFixed(2)} ₽</strong>
+            <div className="plain-list">
+              {rating.map((item, index) => (
+                <div key={item.playerId} className="plain-row">
+                  <span>
+                    {index + 1}. {item.nick} <small>{item.name}</small>
+                  </span>
+                  <span>
+                    {item.totalScore.toFixed(1)} <small>{item.games} игр</small>
+                  </span>
+                </div>
+              ))}
+              {rating.length === 0 ? <small>Рейтинг появится после игр с заполненными баллами.</small> : null}
             </div>
           </div>
         ) : null}

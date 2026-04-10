@@ -460,7 +460,7 @@ a {
 .participant-header,
 .participant-row {
   display: grid;
-  grid-template-columns: 62px 1.2fr 72px 84px 84px 1fr;
+  grid-template-columns: 62px 1.2fr 84px 84px 84px 1fr;
   gap: 0.6rem;
 }
 
@@ -481,6 +481,7 @@ a {
 .participant-row input,
 .participant-row select {
   min-height: 40px;
+  width: 100%;
 }
 
 .stage-switcher {

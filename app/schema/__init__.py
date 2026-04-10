@@ -2,6 +2,7 @@ from .auth import CreateStaffRequest, StaffLoginRequest, StaffMeResponse, StaffR
 from .app_setting import AppSettingResponse, UpdateAppSettingsRequest
 from .event import EventAddPlayer, EventCreateRequest, EventGameItem, EventListResponse, EventPlayerResponse, EventResponse, EventRosterItem
 from .game import (
+    GameDraftExportRequest,
     GameCreateRequest,
     GameFinishRequest,
     GameParticipantDetailResponse,
@@ -26,6 +27,7 @@ __all__ = [
     "EventRosterItem",
     "EventType",
     "GameCreateRequest",
+    "GameDraftExportRequest",
     "GameFinishRequest",
     "GameParticipantDetailResponse",
     "GameParticipantCreateRequest",
