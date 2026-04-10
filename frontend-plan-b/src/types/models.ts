@@ -146,9 +146,6 @@ export interface TestamentDraft {
 
 export interface NightDraft {
   round: number;
-  mafiaTargetSeat: number | null;
-  sheriffCheckSeat: number | null;
-  donCheckSeat: number | null;
   killedSeat: number | null;
   notes: string;
 }

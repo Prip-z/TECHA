@@ -13,4 +13,5 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python -m alembic upgrade head && python -m app.scripts.create_super_admin && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+

@@ -8,15 +8,21 @@ import { useAuth } from "../contexts/AuthContext";
 import { useRealtimeRoom } from "../hooks/useRealtimeRoom";
 import { api } from "../lib/api";
 import { loadGameDraft, saveGameDraft } from "../lib/storage";
-import type { ChatMessage, EventRosterItem, GameDraftState, GameParticipant, GameRecord, GameResult, NightDraft, SyncEnvelope } from "../types/models";
+import type { ChatMessage, EventRosterItem, GameDraftState, GameParticipant, GameRecord, GameResult, NightDraft, SyncEnvelope, VoteDraft } from "../types/models";
 
 const emptyNight = (round: number): NightDraft => ({
   round,
-  mafiaTargetSeat: null,
-  sheriffCheckSeat: null,
-  donCheckSeat: null,
   killedSeat: null,
   notes: "",
+});
+
+const emptyVote = (round: number): VoteDraft => ({
+  round,
+  nominations: [],
+  votes: {},
+  isTie: false,
+  isRevote: false,
+  liftApplied: false,
 });
 
 const emptyDraft: GameDraftState = {
@@ -28,7 +34,7 @@ const emptyDraft: GameDraftState = {
   timerRemainingMs: null,
   winner: null,
   protests: "",
-  votes: [{ round: 1, nominations: [], votes: {}, isTie: false, isRevote: false, liftApplied: false }],
+  votes: [emptyVote(1)],
   shots: [{ round: 1, shooterSeat: null, targetSeat: null }],
   testament: { sourceSeat: null, targetSeats: [] },
   nights: [emptyNight(1)],
@@ -68,9 +74,8 @@ function normalizeDraft(input: GameDraftState | null | undefined): GameDraftStat
     ...emptyDraft,
     ...base,
     timerRemainingMs: base.timerRemainingMs ?? null,
-    votes: base.votes?.length ? base.votes : emptyDraft.votes,
-    shots: base.shots?.length ? base.shots : emptyDraft.shots,
-    nights: base.nights?.length ? base.nights : emptyDraft.nights,
+    votes: base.votes?.length ? base.votes : [emptyVote(base.roundNumber ?? 1)],
+    nights: base.nights?.length ? base.nights : [emptyNight(base.roundNumber ?? 1)],
     chat: base.chat ?? [],
   };
 }
@@ -144,11 +149,21 @@ export function GamePage() {
     () => eventPlayers.filter((player) => !participants.some((participant) => participant.player_id === player.player_id)),
     [eventPlayers, participants],
   );
-  const currentNight = useMemo(() => draft.nights.find((item) => item.round === draft.roundNumber) ?? emptyNight(draft.roundNumber), [draft.nights, draft.roundNumber]);
-  const currentVote = useMemo(
-    () => draft.votes.find((item) => item.round === draft.roundNumber) ?? { round: draft.roundNumber, nominations: [], votes: {}, isTie: false, isRevote: false, liftApplied: false },
-    [draft.roundNumber, draft.votes],
+  const aliveParticipants = useMemo(
+    () => participants.filter((item) => item.is_alive).sort((left, right) => left.seat_number - right.seat_number),
+    [participants],
   );
+  const currentNight = useMemo(() => draft.nights.find((item) => item.round === draft.roundNumber) ?? emptyNight(draft.roundNumber), [draft.nights, draft.roundNumber]);
+  const currentVote = useMemo(() => draft.votes.find((item) => item.round === draft.roundNumber) ?? emptyVote(draft.roundNumber), [draft.roundNumber, draft.votes]);
+  const voteCounts = useMemo(
+    () =>
+      currentVote.nominations.reduce<Record<number, number>>((accumulator, seat) => {
+        accumulator[seat] = Object.values(currentVote.votes).filter((value) => value === seat).length;
+        return accumulator;
+      }, {}),
+    [currentVote.nominations, currentVote.votes],
+  );
+  const votersEntered = useMemo(() => Object.keys(currentVote.votes).length, [currentVote.votes]);
 
   function syncDraft(nextDraft: GameDraftState) {
     const normalized = normalizeDraft(nextDraft);
@@ -158,6 +173,14 @@ export function GamePage() {
 
   function updateDraftLocally(updater: (current: GameDraftState) => GameDraftState) {
     syncDraft(updater(draft));
+  }
+
+  function ensureVoteRound(current: GameDraftState) {
+    return current.votes.some((item) => item.round === current.roundNumber) ? current.votes : [...current.votes, emptyVote(current.roundNumber)];
+  }
+
+  function ensureNightRound(current: GameDraftState) {
+    return current.nights.some((item) => item.round === current.roundNumber) ? current.nights : [...current.nights, emptyNight(current.roundNumber)];
   }
 
   function getNextSeatNumber() {
@@ -235,21 +258,73 @@ export function GamePage() {
     });
   }
 
-  function updateCurrentNight(field: keyof NightDraft, value: string | number | null) {
+  function toggleNomination(seatNumber: number) {
+    updateDraftLocally((current) => {
+      const votes = ensureVoteRound(current);
+      return {
+        ...current,
+        votes: votes.map((item) =>
+          item.round === current.roundNumber
+            ? {
+                ...item,
+                nominations: item.nominations.includes(seatNumber)
+                  ? item.nominations.filter((seat) => seat !== seatNumber)
+                  : [...item.nominations, seatNumber].sort((left, right) => left - right),
+                votes: Object.fromEntries(Object.entries(item.votes).filter(([, value]) => value !== seatNumber)),
+              }
+            : item,
+        ),
+      };
+    });
+  }
+
+  function addVoteToSeat(seatNumber: number) {
+    const nextVoter = aliveParticipants.find((participant) => !(participant.seat_number in currentVote.votes));
+    if (!nextVoter) return;
     updateDraftLocally((current) => ({
       ...current,
-      nights: current.nights.some((item) => item.round === current.roundNumber)
-        ? current.nights.map((item) => (item.round === current.roundNumber ? { ...item, [field]: value } : item))
-        : [...current.nights, { ...emptyNight(current.roundNumber), [field]: value }],
+      votes: ensureVoteRound(current).map((item) =>
+        item.round === current.roundNumber ? { ...item, votes: { ...item.votes, [String(nextVoter.seat_number)]: seatNumber } } : item,
+      ),
     }));
   }
 
-  function updateCurrentVote(field: "nominations" | "votes" | "isTie" | "isRevote" | "liftApplied", value: unknown) {
+  function removeVoteFromSeat(seatNumber: number) {
+    const latestVoter = [...aliveParticipants]
+      .reverse()
+      .find((participant) => currentVote.votes[String(participant.seat_number)] === seatNumber);
+    if (!latestVoter) return;
+    updateDraftLocally((current) => {
+      const currentRound = current.votes.find((item) => item.round === current.roundNumber) ?? emptyVote(current.roundNumber);
+      const nextVotes = { ...currentRound.votes };
+      delete nextVotes[String(latestVoter.seat_number)];
+      return {
+        ...current,
+        votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, votes: nextVotes } : item)),
+      };
+    });
+  }
+
+  function updateManualVote(voterSeat: number, value: string) {
+    updateDraftLocally((current) => {
+      const currentRound = current.votes.find((item) => item.round === current.roundNumber) ?? emptyVote(current.roundNumber);
+      const nextVotes = { ...currentRound.votes };
+      if (!value) {
+        delete nextVotes[String(voterSeat)];
+      } else {
+        nextVotes[String(voterSeat)] = Number(value);
+      }
+      return {
+        ...current,
+        votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, votes: nextVotes } : item)),
+      };
+    });
+  }
+
+  function updateCurrentNight(field: keyof NightDraft, value: string | number | null) {
     updateDraftLocally((current) => ({
       ...current,
-      votes: current.votes.some((item) => item.round === current.roundNumber)
-        ? current.votes.map((item) => (item.round === current.roundNumber ? { ...item, [field]: value } : item))
-        : [...current.votes, { round: current.roundNumber, nominations: [], votes: {}, isTie: false, isRevote: false, liftApplied: false, [field]: value }],
+      nights: ensureNightRound(current).map((item) => (item.round === current.roundNumber ? { ...item, [field]: value } : item)),
     }));
   }
 
@@ -259,7 +334,7 @@ export function GamePage() {
       ...draft,
       phase: "night",
       stage: "shooting",
-      nights: draft.nights.some((item) => item.round === draft.roundNumber) ? draft.nights : [...draft.nights, emptyNight(draft.roundNumber)],
+      nights: ensureNightRound(draft),
     });
   }
 
@@ -271,13 +346,12 @@ export function GamePage() {
       roundNumber: nextRound,
       phase: "day",
       stage: "voting",
+      votes: draft.votes.some((item) => item.round === nextRound) ? draft.votes : [...draft.votes, emptyVote(nextRound)],
       nights: draft.nights,
-      votes: [...draft.votes, { round: nextRound, nominations: [], votes: {}, isTie: false, isRevote: false, liftApplied: false }],
-      shots: draft.shots,
     });
   }
 
-  function applyNightKill() {
+  function applyNightResult() {
     if (currentNight.killedSeat == null) return;
     const killedParticipant = participants.find((item) => item.seat_number === currentNight.killedSeat);
     if (!killedParticipant) return;
@@ -390,50 +464,78 @@ export function GamePage() {
             <div className="game-panels">
               <article className="sheet-panel">
                 <h3>Голосование</h3>
-                <label>
-                  <span>Выставленные места</span>
-                  <input
-                    value={currentVote.nominations.join(",")}
-                    onChange={(event) =>
-                      updateCurrentVote(
-                        "nominations",
-                        event.target.value
-                          .split(",")
-                          .map((item) => Number(item.trim()))
-                          .filter((item) => !Number.isNaN(item)),
-                      )
-                    }
-                  />
-                </label>
-                <label>
-                  <span>Голоса место-цель</span>
-                  <textarea
-                    value={Object.entries(currentVote.votes)
-                      .map(([seat, value]) => `${seat}:${value}`)
-                      .join(", ")}
-                    onChange={(event) => {
-                      const parsed = event.target.value.split(",").reduce<Record<string, number | "X">>((accumulator, pair) => {
-                        const [seat, value] = pair.split(":").map((item) => item.trim());
-                        if (!seat || !value) return accumulator;
-                        accumulator[seat] = value.toUpperCase() === "X" ? "X" : Number(value);
-                        return accumulator;
-                      }, {});
-                      updateCurrentVote("votes", parsed);
-                    }}
-                  />
-                </label>
+                <small>Сначала выставь кандидатов, потом добей голоса быстрыми кнопками или руками по местам.</small>
+
+                <div className="vote-seat-grid">
+                  {aliveParticipants.map((participant) => (
+                    <button
+                      key={participant.id}
+                      className={`vote-seat-chip ${currentVote.nominations.includes(participant.seat_number) ? "active" : ""}`}
+                      onClick={() => toggleNomination(participant.seat_number)}
+                    >
+                      {participant.seat_number}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mini-stats">
+                  <span>Кандидатов: {currentVote.nominations.length}</span>
+                  <span>Голосов внесено: {votersEntered} / {aliveParticipants.length}</span>
+                </div>
+
+                <div className="vote-board">
+                  {currentVote.nominations.length === 0 ? <small>Никто не выставлен на голосование.</small> : null}
+                  {currentVote.nominations.map((seat) => (
+                    <div key={seat} className="vote-row">
+                      <strong>Место {seat}</strong>
+                      <div className="vote-counter">
+                        <button className="ghost-button small" onClick={() => removeVoteFromSeat(seat)}>
+                          -1
+                        </button>
+                        <span>{voteCounts[seat] ?? 0}</span>
+                        <button className="ghost-button small" onClick={() => addVoteToSeat(seat)}>
+                          +1
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="vote-voter-grid">
+                  {aliveParticipants.map((participant) => (
+                    <label key={participant.id}>
+                      <span>Голос места {participant.seat_number}</span>
+                      <select value={String(currentVote.votes[String(participant.seat_number)] ?? "")} onChange={(event) => updateManualVote(participant.seat_number, event.target.value)}>
+                        <option value="">Не указан</option>
+                        {currentVote.nominations.map((seat) => (
+                          <option key={seat} value={seat}>
+                            За {seat}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+
                 <div className="switch-row">
                   <label>
-                    <input type="checkbox" checked={currentVote.isTie} onChange={(event) => updateCurrentVote("isTie", event.target.checked)} />
+                    <input type="checkbox" checked={currentVote.isTie} onChange={(event) => updateDraftLocally((current) => ({
+                      ...current,
+                      votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, isTie: event.target.checked } : item)),
+                    }))} />
                     ничья
                   </label>
                   <label>
-                    <input type="checkbox" checked={currentVote.isRevote} onChange={(event) => updateCurrentVote("isRevote", event.target.checked)} />
+                    <input type="checkbox" checked={currentVote.isRevote} onChange={(event) => updateDraftLocally((current) => ({
+                      ...current,
+                      votes: ensureVoteRound(current).map((item) => (item.round === current.roundNumber ? { ...item, isRevote: event.target.checked } : item)),
+                    }))} />
                     переголосование
                   </label>
                 </div>
+
                 <button className="primary-button" onClick={startNight}>
-                  Завершить день и перейти к ночи
+                  Закрыть голосование и перейти к ночи
                 </button>
               </article>
             </div>
@@ -442,28 +544,23 @@ export function GamePage() {
               <article className="sheet-panel">
                 <h3>Ночь</h3>
                 <label>
-                  <span>Выстрел мафии</span>
-                  <input type="number" value={currentNight.mafiaTargetSeat ?? ""} onChange={(event) => updateCurrentNight("mafiaTargetSeat", Number(event.target.value) || null)} />
-                </label>
-                <label>
-                  <span>Проверка шерифа</span>
-                  <input type="number" value={currentNight.sheriffCheckSeat ?? ""} onChange={(event) => updateCurrentNight("sheriffCheckSeat", Number(event.target.value) || null)} />
-                </label>
-                <label>
-                  <span>Проверка дона</span>
-                  <input type="number" value={currentNight.donCheckSeat ?? ""} onChange={(event) => updateCurrentNight("donCheckSeat", Number(event.target.value) || null)} />
-                </label>
-                <label>
-                  <span>Кто убит</span>
-                  <input type="number" value={currentNight.killedSeat ?? ""} onChange={(event) => updateCurrentNight("killedSeat", Number(event.target.value) || null)} />
+                  <span>Результат</span>
+                  <select value={String(currentNight.killedSeat ?? "")} onChange={(event) => updateCurrentNight("killedSeat", event.target.value ? Number(event.target.value) : null)}>
+                    <option value="">Никто не убит</option>
+                    {aliveParticipants.map((participant) => (
+                      <option key={participant.id} value={participant.seat_number}>
+                        Убит игрок {participant.seat_number}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   <span>Заметки ночи</span>
                   <textarea value={currentNight.notes} onChange={(event) => updateCurrentNight("notes", event.target.value)} />
                 </label>
                 <div className="switch-row">
-                  <button className="ghost-button" onClick={applyNightKill}>
-                    Применить убийство
+                  <button className="ghost-button" onClick={applyNightResult}>
+                    Применить результат ночи
                   </button>
                   <button className="primary-button" onClick={startNextDay}>
                     Начать следующий день
@@ -478,7 +575,6 @@ export function GamePage() {
       <section className="section-card">
         <div className="section-heading">
           <h2>Завершение игры</h2>
-          <small>Для закрытия игры выбери победителя и введи слово подтверждения.</small>
         </div>
         <div className="result-grid">
           <select value={draft.winner ?? ""} onChange={(event) => syncDraft({ ...draft, winner: event.target.value as GameResult })}>
