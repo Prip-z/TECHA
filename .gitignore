@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+
 lib64/
 parts/
 sdist/
@@ -139,3 +139,5 @@ dmypy.json
 
 # IDE - VSCode
 .vscode/*
+!frontend-plan-b/src/lib/
+!frontend-plan-b/src/lib/*.ts
