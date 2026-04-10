@@ -31,7 +31,6 @@ export function LoginPage() {
     <div className="login-screen">
       <div className="login-card">
         <div className="brand brand-login">
-          <span className="brand-mark">M</span>
           <span className="brand-copy">
             <strong>Mafia</strong>
             <small>организатор</small>

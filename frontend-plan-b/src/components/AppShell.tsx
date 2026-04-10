@@ -29,7 +29,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           Архив
         </button>
         <Link className="brand" to="/">
-          <span className="brand-mark">M</span>
           <span className="brand-copy">
             <strong>Mafia</strong>
             <small>{topTitle(location.pathname)}</small>
